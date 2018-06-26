@@ -1,14 +1,13 @@
-package com.locationspaces.alexis.locationplaces
+package com.locationspaces.alexis.locationplaces.activities
 
 import android.app.Activity
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
-import android.graphics.*
+import android.graphics.BitmapFactory
 import android.location.Location
 import android.os.Bundle
 import android.support.v4.app.ActivityCompat
-import android.support.v4.graphics.drawable.RoundedBitmapDrawableFactory
 import android.support.v7.app.AppCompatActivity
 import android.widget.Toast
 import com.google.android.gms.common.api.ResolvableApiException
@@ -20,8 +19,11 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
+import com.locationspaces.alexis.locationplaces.R
+import com.locationspaces.alexis.locationplaces.apis.GoogleApis
 import com.locationspaces.alexis.locationplaces.model.GooglePlace
-import org.json.JSONObject
+import com.locationspaces.alexis.locationplaces.model.GooglePlaceHelper
+import com.locationspaces.alexis.locationplaces.tools.CircleDrawer
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -37,12 +39,19 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var locationRequest: LocationRequest
     private var locationUpdateState = false
 
-    private val GOOGLE_API_KEY = "AIzaSyDFmxkuY9Dh-vQJUFyOFAvneMmKY5QANik"
-
-
+    //TODO : save the POIs in a database (or preferences)
     private var poisList = mutableListOf<GooglePlace>()
 
+    /*private val navigationBarItemSelectedListener = BottomNavigationView.OnNavigationItemSelectedListener { item ->
+        when (item.itemId) {
+            R.id.action_map -> {
 
+            }
+            R.id.action_list -> {
+
+            }
+        }
+    }*/
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,6 +72,32 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
                 lastUserLocation = p0.lastLocation
             }
         }
+
+        //TODO : finish the navigation bar
+        //var navigationBar = this.bottom_navigation_menu as BottomNavigationView
+        //navigationBar.setOnNavigationItemSelectedListener(navigationBarItemSelectedListener)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CHECK_SETTINGS) {
+            if (resultCode == Activity.RESULT_OK) {
+                locationUpdateState = true
+                startLocationUpdates()
+            }
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+    }
+
+    public override fun onResume() {
+        super.onResume()
+        if (!locationUpdateState) {
+            startLocationUpdates()
+        }
     }
 
     /**
@@ -77,11 +112,6 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
         mMap.uiSettings.isZoomControlsEnabled = true
-
-        // Add a marker in Sydney and move the camera
-        val sydney = LatLng(-34.0, 151.0)
-        mMap.addMarker(MarkerOptions().position(sydney).title("Marker in Sydney"))
-        mMap.moveCamera(CameraUpdateFactory.newLatLng(sydney))
 
         initUserLocation()
     }
@@ -127,20 +157,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun loadNearbyPoints() {
-
-        if (lastUserLocation != null) {
-            //var params = URLEncoder.encode("location=", "UTF-8") + "=" + URLEncoder.encode(lastUserLocation.latitude.toString(), "UTF-8") + "," + URLEncoder.encode(lastUserLocation.longitude.toString(), "UTF-8")
-            //reqParam += "&" + URLEncoder.encode("password", "UTF-8") + "=" + URLEncoder.encode(password, "UTF-8")
-            // val mURL = URL("<Your API Link>")
-
-            var urlPath = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-            urlPath += "?location=" +lastUserLocation.latitude.toString() +"," +lastUserLocation.longitude.toString()
-            urlPath += "&radius=2000"
-            urlPath += "&key=" +GOOGLE_API_KEY
-
-            println(urlPath)
-            val mURL = URL(urlPath)
-            with(mURL.openConnection() as HttpURLConnection) {
+         with(GoogleApis().urlForNearbyLocations(lastUserLocation).openConnection() as HttpURLConnection) {
                 // optional default is GET
                 requestMethod = "GET"
 
@@ -152,42 +169,16 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
                         response.append(inputLine)
                         inputLine = it.readLine()
                     }
-
-                    val jsonObj = JSONObject(response.toString())
-
-                    if (jsonObj.has("results")) {
-                        val placeJson = jsonObj.getJSONArray("results")
-
-                        for (i in 0 until placeJson!!.length() -1) {
-                            val place = placeJson.getJSONObject(i)
-                            if (place.has("geometry") and place.getJSONObject("geometry").has("location")) {
-                                val placeLocationJson = place.getJSONObject("geometry").getJSONObject("location")
-                                var photoRef = ""
-                                if (place.has("photos")) {
-                                    photoRef = place.getJSONArray("photos").getJSONObject(0).getString("photo_reference")
-                                }
-
-                                poisList.add(GooglePlace(place.getString("id"), place.getString("name"), place.getString("icon"),photoRef, placeLocationJson.getDouble("lat"), placeLocationJson.getDouble("lng")))
-
-                            }
-                        }
-                    }
-                    println(poisList)
+                    poisList = GooglePlaceHelper().createGooglePlacesJson(response.toString())
                 }
-            }
-        }
-
-        //https://maps.googleapis.com/maps/api/place/findplacefromtext/output?input=parameters
-
-//https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=-33.8670522,151.1957362&radius=1500&key=AIzaSyAntuIe_aZ6DIKKlT45I9TgDRe8W9kmBs4
-
+         }
     }
 
     private fun placeMarkerOnMap() {
         poisList.forEach { place ->
             val markerOptions = MarkerOptions().position(LatLng(place.latitude, place.longitude))
 
-            var urlPath = ""
+            var urlPath: String
             if (place.imageReferencePath.equals("")) {
                 urlPath = place.imagePath
                 val url = URL(urlPath)
@@ -201,30 +192,10 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
                 }).start()
 
             } else {
-                var urlPath = "https://maps.googleapis.com/maps/api/place/photo?maxwidth=150"
-                urlPath += "&photoreference=" +place.imageReferencePath
-                urlPath += "&key=" +GOOGLE_API_KEY
-
-                val url = URL(urlPath)
-
                 Thread({
-                    val bitmap = BitmapFactory.decodeStream(url.openConnection().getInputStream())
+                    val bitmap = BitmapFactory.decodeStream(GoogleApis().urlForReferencePicture(place.imageReferencePath).openConnection().getInputStream())
                     runOnUiThread({
-
-                        val roundDrawable = RoundedBitmapDrawableFactory.create(resources, bitmap)
-                        roundDrawable.isCircular = true
-
-                        val output = Bitmap.createBitmap(roundDrawable.bitmap!!.width, roundDrawable.bitmap!!.height!!, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(output)
-
-                        val paint = Paint()
-                        val rect = Rect(0,0,bitmap.width, bitmap.height)
-                        canvas.drawARGB(0,0,0,0)
-                        canvas.drawCircle((bitmap.width / 2).toFloat(), (bitmap.height / 2).toFloat(), (bitmap.width / 2).toFloat(), paint)
-                        paint.setXfermode(PorterDuffXfermode(PorterDuff.Mode.SRC_IN))
-                        canvas.drawBitmap(bitmap,rect,rect,paint)
-
-                        markerOptions.icon(BitmapDescriptorFactory.fromBitmap(output))
+                        markerOptions.icon(BitmapDescriptorFactory.fromBitmap(CircleDrawer().convertBitmapToCircle(bitmap, resources)))
                         mMap.addMarker(markerOptions)
                     })
                 }).start()
@@ -238,9 +209,6 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
                 "Your location can't be displayed - The permission is required",
                 Toast.LENGTH_LONG).show()
     }
-
-    //https://maps.googleapis.com/maps/api/place/photo?
-    // maxwidth=400&photoreference=CnRtAAAATLZNl354RwP_9UKbQ_5Psy40texXePv4oAlgP4qNEkdIrkyse7rPXYGd9D_Uj1rVsQdWT4oRz4QrYAJNpFX7rzqqMlZw2h2E2y5IKMUZ7ouD_SlcHxYq1yL4KbKUv3qtWgTK0A6QbGh87GB3sscrHRIQiG2RrmU_jF4tENr9wGS_YxoUSSDrYjWmrNfeEHSGSc3FyhNLlBU&key=YOUR_API_KEY
 
     // Request permissions result
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
@@ -269,28 +237,6 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
         fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null /* Looper */)
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_CHECK_SETTINGS) {
-            if (resultCode == Activity.RESULT_OK) {
-                locationUpdateState = true
-                startLocationUpdates()
-            }
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-    }
-
-    public override fun onResume() {
-        super.onResume()
-        if (!locationUpdateState) {
-            startLocationUpdates()
-        }
-    }
-
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1
         private const val REQUEST_CHECK_SETTINGS = 2
@@ -313,21 +259,13 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
             startLocationUpdates()
         }
         task.addOnFailureListener { e ->
-            // 6
             if (e is ResolvableApiException) {
-                // Location settings are not satisfied, but this can be fixed
-                // by showing the user a dialog.
                 try {
-                    // Show the dialog by calling startResolutionForResult(),
-                    // and check the result in onActivityResult().
                     e.startResolutionForResult(this@MapsActivity,
                             REQUEST_CHECK_SETTINGS)
                 } catch (sendEx: IntentSender.SendIntentException) {
-                    // Ignore the error.
                 }
             }
         }
     }
-
-
 }
